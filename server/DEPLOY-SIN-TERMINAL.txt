@@ -1,0 +1,88 @@
+NominaPro — despliegue sin SSH / solo FTP + panel web
+======================================================
+
+Todo lo que necesitás puede hacerse en tu PC y en el panel del hosting (phpMyAdmin, administrador de archivos).
+
+1) Base de datos (phpMyAdmin o similar)
+   - Creá la base `nominapro` (o el nombre que uses).
+   - Pestaña SQL → pegá y ejecutá el contenido del archivo del proyecto:
+     mysql/001_schema_from_supabase.sql
+
+2) Config PHP (FTP / administrador de archivos)
+   - Subí la carpeta `includes` del proyecto (server/includes).
+   - Copiá `includes/config.example.php` y renombrá la copia a `config.local.php`.
+   - Editá `config.local.php` con tus datos MySQL (host, usuario, contraseña, nombre de BD).
+   - Si el front está en OTRO dominio que la API, en `cors_origins` poné la URL exacta del front (ej. https://app.tudominio.com).
+
+3) API PHP
+   - Subí `server/public/api/index.php` de modo que quede accesible como:
+     https://TU_DOMINIO/api/index.php
+   - Estructura típica en public_html:
+       public_html/
+         api/index.php
+         includes/bootstrap.php
+         includes/config.local.php
+         includes/config.example.php
+         includes/.htaccess
+
+4) Frontend (en tu PC, sí necesitás terminal local solo una vez)
+   - npm install
+   - npm run build
+   - Subí TODO el contenido de la carpeta `dist/` a la raíz del sitio (o donde sirva tu dominio):
+       public_html/index.html
+       public_html/assets/...
+
+   Si compilás en la PC con la API ya definida:
+   - Creá `.env.local` con VITE_API_URL=https://TU_DOMINIO   (sin barra final)
+   - npm run build
+   Si front y API están en el MISMO dominio y `/api/index.php` existe ahí, podés dejar VITE_API_URL vacío.
+
+5) Probar
+   - Abrí la web → registro / login.
+   - Si ves errores de CORS o sesión, revisá mismo dominio vs VITE_API_URL y cors_origins.
+
+No hace falta Composer ni ejecutar PHP por terminal en el servidor: solo PHP + extensiones PDO MySQL (habitual en cualquier hosting).
+
+
+Tu caso: jr2moda.store en la raíz + NominaPro en subdominio nomina.jr2moda.store
+===========================================================================
+
+En el panel del hosting configurás el subdominio `nomina` para que el directorio raíz del sitio sea:
+
+    public_html/nomina/
+
+(dentro seguís teniendo tu otra web en public_html sin tocar.)
+
+Estructura final recomendada:
+
+    public_html/
+      ... (tu sitio principal en la raíz)
+      nomina/
+        index.html              ← salida de npm run build (dist/)
+        assets/                 ← carpeta assets del build
+        api/
+          index.php             ← desde server/public/api/index.php
+        includes/
+          bootstrap.php
+          config.local.php
+          .htaccess
+
+URLs resultantes:
+  - App:    https://nomina.jr2moda.store/
+  - API:    https://nomina.jr2moda.store/api/index.php
+
+Compilar el front:
+  - Dejá VITE_API_URL vacío (mismo origen: todo va por nomina.jr2moda.store).
+  - npm run build → subí el contenido de dist/ dentro de public_html/nomina/
+
+CORS en config.local.php:
+  - Podés dejar cors_origins vacío si solo entrás por https://nomina.jr2moda.store
+  - Si querés ser explícito: cors_origins = https://nomina.jr2moda.store
+
+Opcional: copiá server/public/spa.htaccess.example a public_html/nomina/.htaccess
+
+IMPORTANTE — No uses https://jr2moda.store/nomina/ como URL principal del SPA si el
+subdominio ya apunta a la carpeta: en ese caso la URL correcta es siempre
+https://nomina.jr2moda.store/ (sin /nomina en la ruta). Solo necesitarías base '/nomina/'
+en Vite si el navegador abriera la app como https://jr2moda.store/nomina/ (mismo dominio,
+subcarpeta visible en la URL).

@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "serve:php": "php -S 127.0.0.1:8080 -t server/public",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.97.0",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.575.0",
     "react": "^19.2.0",

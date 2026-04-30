@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Mail, Lock, UserPlus, ArrowLeft } from 'lucide-react'
 import { signUp } from '../lib/auth'
+import { useAuth } from '../contexts/AuthContext'
 import SalarySetup from './SalarySetup'
 
 interface RegisterProps {
@@ -9,6 +10,7 @@ interface RegisterProps {
 }
 
 export default function Register({ onSuccess, onSwitchToLogin }: RegisterProps) {
+  const { refreshUser } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -35,9 +37,6 @@ export default function Register({ onSuccess, onSwitchToLogin }: RegisterProps) 
     try {
       await signUp(email, password)
       setSuccess(true)
-      setTimeout(() => {
-        onSuccess()
-      }, 2000)
     } catch (err) {
       if (err instanceof Error) {
         setError(err.message)
@@ -50,7 +49,14 @@ export default function Register({ onSuccess, onSwitchToLogin }: RegisterProps) 
   }
 
   if (success) {
-    return <SalarySetup onSuccess={onSuccess} />
+    return (
+      <SalarySetup
+        onSuccess={async () => {
+          await refreshUser()
+          onSuccess()
+        }}
+      />
+    )
   }
 
   return (

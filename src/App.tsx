@@ -102,7 +102,7 @@ export default function App() {
   const [showCobraModal, setShowCobraModal] = useState(false)
   const [showPaymentHistory, setShowPaymentHistory] = useState(false)
 
-  // Load data from Supabase on component mount
+  // Load data from API al iniciar sesión
   useEffect(() => {
     if (!user) return
 
@@ -699,7 +699,7 @@ export default function App() {
         {/* Footer */}
         <footer className="border-t border-slate-700 bg-slate-800/50 backdrop-blur-xl mt-12 md:mt-16 py-8 md:py-12 w-full">
           <div className="w-full app-container mx-auto text-center text-slate-400 text-sm">
-            <p>Datos sincronizados con Supabase • NominaPro v1.0</p>
+            <p>Sincronizado con tu servidor • NominaPro v1.0</p>
           </div>
         </footer>
 

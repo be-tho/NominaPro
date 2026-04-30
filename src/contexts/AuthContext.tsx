@@ -1,11 +1,12 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { User } from '../lib/auth'
-import { getCurrentUser, onAuthStateChange } from '../lib/auth'
+import { getCurrentUser, signOut as signOutAuth } from '../lib/auth'
 
 interface AuthContextType {
   user: User | null
   loading: boolean
   signOut: () => Promise<void>
+  refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -14,46 +15,43 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const currentUser = await getCurrentUser()
+      setUser(currentUser)
+    } catch {
+      setUser(null)
+    }
+  }, [])
+
   useEffect(() => {
-    const initAuth = async () => {
+    let cancelled = false
+    ;(async () => {
       try {
         const currentUser = await getCurrentUser()
-        setUser(currentUser)
-      } catch (error) {
-        setUser(null)
+        if (!cancelled) setUser(currentUser)
+      } catch {
+        if (!cancelled) setUser(null)
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
-    }
-
-    initAuth()
-
-    try {
-      const subscription = onAuthStateChange((newUser) => {
-        setUser(newUser)
-        setLoading(false)
-      })
-
-      return () => {
-        subscription?.unsubscribe()
-      }
-    } catch (error) {
-      setLoading(false)
+    })()
+    return () => {
+      cancelled = true
     }
   }, [])
 
   const handleSignOut = async () => {
     try {
-      const { signOut: signOutAuth } = await import('../lib/auth')
       await signOutAuth()
       setUser(null)
-    } catch (error) {
+    } catch {
       // Sign out error
     }
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signOut: handleSignOut }}>
+    <AuthContext.Provider value={{ user, loading, signOut: handleSignOut, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )
@@ -66,4 +64,3 @@ export const useAuth = () => {
   }
   return context
 }
-

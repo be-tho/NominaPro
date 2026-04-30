@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Mail, Lock, LogInIcon } from 'lucide-react'
 import { signIn } from '../lib/auth'
+import { useAuth } from '../contexts/AuthContext'
 
 interface LoginProps {
   onSuccess: () => void
@@ -8,6 +9,7 @@ interface LoginProps {
 }
 
 export default function Login({ onSuccess, onSwitchToRegister }: LoginProps) {
+  const { refreshUser } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -20,6 +22,7 @@ export default function Login({ onSuccess, onSwitchToRegister }: LoginProps) {
 
     try {
       await signIn(email, password)
+      await refreshUser()
       onSuccess()
     } catch (err) {
       if (err instanceof Error) {
