@@ -40,7 +40,13 @@ export async function apiFetch<T>(route: string, init?: ApiInit): Promise<T> {
 
   const json = (await res.json().catch(() => null)) as ApiEnvelopeOk<T> | ApiEnvelopeErr | null
   if (!json || typeof json !== 'object' || !('ok' in json)) {
-    throw new Error('Respuesta inválida del servidor')
+    const hint =
+      res.ok === false && res.status >= 400
+        ? ` (HTTP ${res.status}${res.statusText ? `: ${res.statusText}` : ''})`
+        : ''
+    throw new Error(
+      `Respuesta inválida del servidor${hint}. ¿La URL /api/index.php devuelve JSON? Revisá .htaccess en la raíz del sitio.`
+    )
   }
   if (!json.ok) {
     throw new Error(json.error || `Error HTTP ${res.status}`)

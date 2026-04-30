@@ -23,6 +23,20 @@ $dbCharset = $cfg['db_charset'] ?? 'utf8mb4';
 $corsRaw = $cfg['cors_origins'] ?? getenv('NOMINAPRO_CORS_ORIGINS') ?: '';
 $corsOrigins = array_values(array_filter(array_map('trim', explode(',', $corsRaw))));
 
+if (!extension_loaded('pdo') || !extension_loaded('pdo_mysql')) {
+    http_response_code(503);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(
+        [
+            'ok' => false,
+            'error' => 'En PHP hay que tener activadas las extensiones pdo y pdo_mysql (en cPanel: Select PHP Version → Extensions).',
+            'php_version' => PHP_VERSION,
+        ],
+        JSON_UNESCAPED_UNICODE
+    );
+    exit;
+}
+
 function nominapro_uuid_v4(): string
 {
     $b = random_bytes(16);
@@ -39,27 +53,46 @@ function nominapro_uuid_v4(): string
 }
 
 /** @var PDO $pdo */
-$pdo = new PDO(
-    sprintf('mysql:host=%s;dbname=%s;charset=%s', $dbHost, $dbName, $dbCharset),
-    $dbUser,
-    $dbPass,
-    [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]
-);
+try {
+    $pdo = new PDO(
+        sprintf('mysql:host=%s;dbname=%s;charset=%s', $dbHost, $dbName, $dbCharset),
+        $dbUser,
+        $dbPass,
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]
+    );
+} catch (PDOException $e) {
+    http_response_code(503);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(
+        [
+            'ok' => false,
+            'error' => 'No se pudo conectar a MySQL. Revisá db_host, db_name, db_user y db_pass en includes/config.local.php.',
+        ],
+        JSON_UNESCAPED_UNICODE
+    );
+    exit;
+}
 
-session_set_cookie_params([
-    'lifetime' => 0,
-    'path' => '/',
-    'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
-    'httponly' => true,
-    'samesite' => 'Lax',
-]);
+$secureCookie = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+if (PHP_VERSION_ID >= 70300) {
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'secure' => $secureCookie,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+} else {
+    session_set_cookie_params(0, '/', '', $secureCookie, true);
+}
 
 session_start();
 
-function nominapro_json(bool $ok, mixed $data = null, ?string $error = null, int $http = 200): void
+/** @param mixed $data */
+function nominapro_json(bool $ok, $data = null, ?string $error = null, int $http = 200): void
 {
     http_response_code($http);
     header('Content-Type: application/json; charset=utf-8');
