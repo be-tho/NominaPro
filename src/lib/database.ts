@@ -11,6 +11,8 @@ export interface DayData {
   id?: string
   date: string
   type: DayType
+  additional_title?: string | null
+  additional_amount?: number | null
   user_id?: string
   created_at?: string
   updated_at?: string
@@ -59,18 +61,30 @@ export const insertDayData = async (dayData: DayData) => {
     body: JSON.stringify({
       date: dayData.date,
       type: dayData.type,
+      additional_title: dayData.additional_title ?? null,
+      additional_amount: dayData.additional_amount ?? null,
     }),
   })
 }
 
-export const updateDayData = async (date: string, type: DayType) => {
+export const updateDayData = async (
+  date: string,
+  type: DayType,
+  additionalTitle?: string | null,
+  additionalAmount?: number | null
+) => {
   if (type === null) {
     await deleteDayData(date)
     return
   }
   await apiFetch<{ updated: number }>('/days', {
     method: 'PATCH',
-    body: JSON.stringify({ date, type }),
+    body: JSON.stringify({
+      date,
+      type,
+      additional_title: additionalTitle ?? null,
+      additional_amount: additionalAmount ?? null,
+    }),
   })
 }
 

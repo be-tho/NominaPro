@@ -113,9 +113,19 @@ if ($key === 'GET /auth/me') {
 // -------------------- days (auth) --------------------
 if ($key === 'GET /days') {
     $user = nominapro_require_user();
-    $st = $pdo->prepare(
-        'SELECT id, user_id, `date`, type, created_at, updated_at FROM days WHERE user_id = ? ORDER BY `date` ASC'
-    );
+    $describe = $pdo->query('DESCRIBE days')->fetchAll();
+    $columns = array_map(static fn (array $row): string => (string) ($row['Field'] ?? ''), $describe);
+
+    $selectFields = ['id', 'user_id', '`date`', 'type', 'created_at', 'updated_at'];
+    if (in_array('additional_title', $columns, true)) {
+        $selectFields[] = 'additional_title';
+    }
+    if (in_array('additional_amount', $columns, true)) {
+        $selectFields[] = 'additional_amount';
+    }
+
+    $quoted = array_map(static fn (string $field): string => $field === '`date`' ? '`date`' : '`' . str_replace('`', '``', $field) . '`', $selectFields);
+    $st = $pdo->prepare('SELECT ' . implode(', ', $quoted) . ' FROM days WHERE user_id = ? ORDER BY `date` ASC');
     $st->execute([$user['id']]);
     $rows = $st->fetchAll();
     foreach ($rows as &$row) {
@@ -137,9 +147,29 @@ if ($key === 'POST /days') {
         nominapro_json(false, null, 'Tipo de día inválido', 422);
     }
 
+    $describe = $pdo->query('DESCRIBE days')->fetchAll();
+    $columns = array_map(static fn (array $row): string => (string) ($row['Field'] ?? ''), $describe);
+
+    $fields = ['user_id', '`date`', 'type'];
+    $values = [$user['id'], $date, $type];
+
+    $additionalTitle = trim((string) ($body['additional_title'] ?? ''));
+    $additionalAmount = filter_var($body['additional_amount'] ?? null, FILTER_VALIDATE_FLOAT);
+
+    if (in_array('additional_title', $columns, true)) {
+        $fields[] = 'additional_title';
+        $values[] = $additionalTitle !== '' ? $additionalTitle : null;
+    }
+    if (in_array('additional_amount', $columns, true)) {
+        $fields[] = 'additional_amount';
+        $values[] = ($additionalAmount !== false && $additionalAmount > 0) ? $additionalAmount : null;
+    }
+
     try {
-        $ins = $pdo->prepare('INSERT INTO days (user_id, `date`, type) VALUES (?, ?, ?)');
-        $ins->execute([$user['id'], $date, $type]);
+        $placeholders = implode(', ', array_fill(0, count($fields), '?'));
+        $quotedFields = array_map(static fn (string $field): string => $field === '`date`' ? '`date`' : '`' . str_replace('`', '``', $field) . '`', $fields);
+        $ins = $pdo->prepare('INSERT INTO days (' . implode(', ', $quotedFields) . ') VALUES (' . $placeholders . ')');
+        $ins->execute($values);
     } catch (PDOException $e) {
         if (($e->errorInfo[1] ?? null) === 1062) {
             nominapro_json(false, null, 'Ya existe un registro para esa fecha', 409);
@@ -147,7 +177,15 @@ if ($key === 'POST /days') {
         throw $e;
     }
 
-    $sel = $pdo->prepare('SELECT id, user_id, `date`, type FROM days WHERE user_id = ? AND `date` = ? LIMIT 1');
+    $selectFields = ['id', 'user_id', '`date`', 'type'];
+    if (in_array('additional_title', $columns, true)) {
+        $selectFields[] = 'additional_title';
+    }
+    if (in_array('additional_amount', $columns, true)) {
+        $selectFields[] = 'additional_amount';
+    }
+    $quotedSelect = array_map(static fn (string $field): string => $field === '`date`' ? '`date`' : '`' . str_replace('`', '``', $field) . '`', $selectFields);
+    $sel = $pdo->prepare('SELECT ' . implode(', ', $quotedSelect) . ' FROM days WHERE user_id = ? AND `date` = ? LIMIT 1');
     $sel->execute([$user['id'], $date]);
     nominapro_json(true, ['day' => $sel->fetch()]);
 }
@@ -164,8 +202,27 @@ if ($key === 'PATCH /days') {
         nominapro_json(false, null, 'Tipo de día inválido', 422);
     }
 
-    $up = $pdo->prepare('UPDATE days SET type = ?, updated_at = CURRENT_TIMESTAMP(6) WHERE user_id = ? AND `date` = ?');
-    $up->execute([$type, $user['id'], $date]);
+    $describe = $pdo->query('DESCRIBE days')->fetchAll();
+    $columns = array_map(static fn (array $row): string => (string) ($row['Field'] ?? ''), $describe);
+    $fields = ['type = ?'];
+    $values = [$type];
+
+    $additionalTitle = trim((string) ($body['additional_title'] ?? ''));
+    $additionalAmount = filter_var($body['additional_amount'] ?? null, FILTER_VALIDATE_FLOAT);
+
+    if (in_array('additional_title', $columns, true)) {
+        $fields[] = 'additional_title = ?';
+        $values[] = $additionalTitle !== '' ? $additionalTitle : null;
+    }
+    if (in_array('additional_amount', $columns, true)) {
+        $fields[] = 'additional_amount = ?';
+        $values[] = ($additionalAmount !== false && $additionalAmount > 0) ? $additionalAmount : null;
+    }
+
+    $values[] = $user['id'];
+    $values[] = $date;
+    $up = $pdo->prepare('UPDATE days SET ' . implode(', ', $fields) . ', updated_at = CURRENT_TIMESTAMP(6) WHERE user_id = ? AND `date` = ?');
+    $up->execute($values);
     nominapro_json(true, ['updated' => $up->rowCount()]);
 }
 
@@ -190,12 +247,9 @@ if ($key === 'POST /days/delete-all') {
 // -------------------- settings --------------------
 if ($key === 'GET /settings') {
     $user = nominapro_require_user();
-    $st = $pdo->prepare(
-        'SELECT id, user_id, monthly_salary, created_at, updated_at FROM user_settings WHERE user_id = ? LIMIT 1'
-    );
+    $st = $pdo->prepare('SELECT id, user_id, monthly_salary, created_at, updated_at FROM user_settings WHERE user_id = ? LIMIT 1');
     $st->execute([$user['id']]);
-    $row = $st->fetch();
-    nominapro_json(true, ['settings' => $row ?: null]);
+    nominapro_json(true, ['settings' => $st->fetch() ?: null]);
 }
 
 if ($key === 'PUT /settings') {
@@ -208,6 +262,7 @@ if ($key === 'PUT /settings') {
 
     $exists = $pdo->prepare('SELECT id FROM user_settings WHERE user_id = ? LIMIT 1');
     $exists->execute([$user['id']]);
+
     if ($exists->fetch()) {
         $up = $pdo->prepare('UPDATE user_settings SET monthly_salary = ?, updated_at = CURRENT_TIMESTAMP(6) WHERE user_id = ?');
         $up->execute([$salary, $user['id']]);
@@ -216,7 +271,7 @@ if ($key === 'PUT /settings') {
         $ins->execute([$user['id'], $salary]);
     }
 
-    $st = $pdo->prepare('SELECT id, user_id, monthly_salary FROM user_settings WHERE user_id = ? LIMIT 1');
+    $st = $pdo->prepare('SELECT id, user_id, monthly_salary, created_at, updated_at FROM user_settings WHERE user_id = ? LIMIT 1');
     $st->execute([$user['id']]);
     nominapro_json(true, ['settings' => $st->fetch()]);
 }

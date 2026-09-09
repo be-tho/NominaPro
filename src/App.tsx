@@ -49,47 +49,48 @@ interface AppState {
  * Formula: salary / 26 days
  * Returns: rounded integer value
  */
-const calculateDailyValue = (monthlySalary: number): number => {
-  return Math.round(monthlySalary / 26)
-}
+const calculateDailyValue = (monthlySalary: number): number => Math.round(monthlySalary / 26)
 
 const getDayTypeValue = (type: DayType): number => {
   const values: Record<Exclude<DayType, null>, number> = {
-    'full': 1,
-    'half': 0.5,
-    'holiday': 1,
+    full: 1,
+    half: 0.5,
+    holiday: 1,
     'holiday-worked': 2,
     'not-working': 0,
   }
+
   return type ? values[type] : 0
 }
 
 const getDayTypeLabel = (type: DayType): string => {
   const labels: Record<Exclude<DayType, null>, string> = {
-    'full': 'Día Completo',
-    'half': 'Medio Día',
-    'holiday': 'Feriado (No trabajado)',
+    full: 'Día Completo',
+    half: 'Medio Día',
+    holiday: 'Feriado',
     'holiday-worked': 'Feriado Trabajado',
     'not-working': 'No Trabajado',
   }
+
   return type ? labels[type] : 'Sin registrar'
 }
 
 const getDayTypeColor = (type: DayType): string => {
   const colors: Record<Exclude<DayType, null>, string> = {
-    'full': 'bg-green-500',
-    'half': 'bg-yellow-500',
-    'holiday': 'bg-purple-500',
+    full: 'bg-green-500',
+    half: 'bg-yellow-500',
+    holiday: 'bg-purple-500',
     'holiday-worked': 'bg-red-500',
-    'not-working': 'bg-gray-300',
+    'not-working': 'bg-slate-600',
   }
-  return type ? colors[type] : 'bg-white border-2 border-gray-200'
+
+  return type ? colors[type] : 'bg-slate-700'
 }
 
 export default function App() {
   const { user, loading: authLoading, signOut } = useAuth()
   const [showAuthModal, setShowAuthModal] = useState<'login' | 'register' | null>(null)
-  
+
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [state, setState] = useState<AppState>({ days: [], monthlySalary: 40000 })
   const [loading, setLoading] = useState(true)
@@ -99,6 +100,8 @@ export default function App() {
   const [showForm, setShowForm] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [salaryInput, setSalaryInput] = useState(state.monthlySalary.toString())
+  const [extraTitleInput, setExtraTitleInput] = useState('')
+  const [extraAmountInput, setExtraAmountInput] = useState('')
   const [showCobraModal, setShowCobraModal] = useState(false)
   const [showPaymentHistory, setShowPaymentHistory] = useState(false)
 
@@ -113,7 +116,7 @@ export default function App() {
           fetchAllDays(),
           fetchUserSettings(),
         ])
-        
+
         setState({
           days: daysData,
           monthlySalary: settings?.monthly_salary ?? 40000,
@@ -128,6 +131,19 @@ export default function App() {
 
     loadData()
   }, [user])
+
+  useEffect(() => {
+    if (!selectedDate) {
+      setExtraTitleInput('')
+      setExtraAmountInput('')
+      return
+    }
+
+    const dateStr = format(selectedDate, 'yyyy-MM-dd')
+    const day = state.days.find(d => d.date === dateStr)
+    setExtraTitleInput(day?.additional_title ?? '')
+    setExtraAmountInput(day?.additional_amount != null ? String(day.additional_amount) : '')
+  }, [selectedDate, state.days])
 
   // Show login if user is not authenticated
   if (authLoading) {
@@ -165,31 +181,44 @@ export default function App() {
 
   const setDayType = async (date: Date, type: DayType) => {
     const dateStr = format(date, 'yyyy-MM-dd')
+    const normalizedExtraTitle = extraTitleInput.trim()
+    const parsedExtraAmount = Number(extraAmountInput)
+    const normalizedExtraAmount = Number.isFinite(parsedExtraAmount) && parsedExtraAmount > 0 ? parsedExtraAmount : null
+
     setSyncing(true)
     try {
       const existingDay = getDayData(date)
-      
+
       if (existingDay) {
         if (type === null) {
-          // Delete the day
           await deleteDayData(dateStr)
           setState(prev => ({
             ...prev,
             days: prev.days.filter(d => d.date !== dateStr),
           }))
         } else {
-          // Update the day
-          await updateDayData(dateStr, type)
+          await updateDayData(dateStr, type, normalizedExtraTitle || null, normalizedExtraAmount)
           setState(prev => ({
             ...prev,
             days: prev.days.map(d =>
-              d.date === dateStr ? { ...d, type } : d
+              d.date === dateStr
+                ? {
+                    ...d,
+                    type,
+                    additional_title: normalizedExtraTitle || null,
+                    additional_amount: normalizedExtraAmount,
+                  }
+                : d
             ),
           }))
         }
       } else if (type !== null) {
-        // Insert new day
-        const newDay = { date: dateStr, type }
+        const newDay = {
+          date: dateStr,
+          type,
+          additional_title: normalizedExtraTitle || null,
+          additional_amount: normalizedExtraAmount,
+        }
         await insertDayData(newDay)
         setState(prev => ({
           ...prev,
@@ -201,13 +230,15 @@ export default function App() {
     } finally {
       setSyncing(false)
     }
+
     setSelectedDate(null)
     setShowForm(false)
   }
 
   const handleSalaryChange = async () => {
-    const salary = parseInt(salaryInput)
-    if (!isNaN(salary) && salary > 0) {
+    const salary = Number.parseInt(salaryInput, 10)
+
+    if (!Number.isNaN(salary) && salary > 0) {
       setSyncing(true)
       try {
         await updateUserSettings(salary)
@@ -263,11 +294,13 @@ export default function App() {
   }
 
   const calculateTotals = () => {
-    const totalUnits = state.days.reduce((sum, day) => {
-      return sum + getDayTypeValue(day.type)
-    }, 0)
+    const totalUnits = state.days.reduce((sum, day) => sum + getDayTypeValue(day.type), 0)
     const dailyValue = calculateDailyValue(state.monthlySalary)
-    const totalMoney = Math.round(totalUnits * dailyValue)
+    const additionalTotal = state.days.reduce((sum, day) => {
+      const amount = Number(day.additional_amount)
+      return sum + (Number.isFinite(amount) && amount > 0 ? amount : 0)
+    }, 0)
+    const totalMoney = Math.round(totalUnits * dailyValue) + additionalTotal
 
     const dayBreakdown = {
       full: state.days.filter(d => d.type === 'full').length,
@@ -586,7 +619,7 @@ export default function App() {
 
                 {/* Legend */}
                 <div className="bg-slate-700/30 border-t border-slate-700 p-6">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 text-xs">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4 text-xs">
                     <div className="flex items-center gap-2 text-slate-300">
                       <div className="w-3 h-3 rounded bg-green-500" />
                       <span>Completo</span>
@@ -658,30 +691,57 @@ export default function App() {
                   </div>
 
                   <div className="space-y-3">
-                    {(['full', 'half', 'holiday', 'holiday-worked', 'not-working'] as DayType[]).map(
-                      type => {
-                        const isSelected = getDayData(selectedDate)?.type === type
-                        return (
-                          <button
-                            key={type}
-                            onClick={() => setDayType(selectedDate, type)}
-                            className={`
-                              w-full p-4 rounded-lg font-medium text-sm transition-all
-                              ${
-                                isSelected
-                                  ? `${getDayTypeColor(type)} text-white ring-2 ring-offset-2 ring-offset-slate-800`
-                                  : `bg-slate-700 text-slate-300 hover:bg-slate-600 border border-slate-600`
-                              }
-                            `}
-                          >
-                            <div className="font-bold">{getDayTypeLabel(type)}</div>
-                            <div className="text-xs opacity-75">
-                              {getDayTypeValue(type)} unidad(es)
-                            </div>
-                          </button>
-                        )
-                      }
-                    )}
+                    {(['full', 'half', 'holiday', 'holiday-worked', 'not-working'] as DayType[]).map(type => {
+                      const isSelected = getDayData(selectedDate)?.type === type
+
+                      return (
+                        <button
+                          key={type}
+                          onClick={() => setDayType(selectedDate, type)}
+                          className={`
+                            w-full p-4 rounded-lg font-medium text-sm transition-all
+                            ${
+                              isSelected
+                                ? `${getDayTypeColor(type)} text-white ring-2 ring-offset-2 ring-offset-slate-800`
+                                : 'bg-slate-700 text-slate-300 hover:bg-slate-600 border border-slate-600'
+                            }
+                          `}
+                        >
+                          <div className="font-bold">{getDayTypeLabel(type)}</div>
+                          <div className="text-xs opacity-75">{getDayTypeValue(type)} unidad(es)</div>
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  <div className="mt-5 border-t border-slate-700 pt-4 space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                        Adicional por día (título)
+                      </label>
+                      <input
+                        type="text"
+                        value={extraTitleInput}
+                        onChange={e => setExtraTitleInput(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        placeholder="Ej: Horas extras"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                        Adicional por día ($)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={extraAmountInput}
+                        onChange={e => setExtraAmountInput(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        placeholder="0"
+                      />
+                    </div>
                   </div>
 
                   <button

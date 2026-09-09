@@ -12,6 +12,23 @@ interface CobraModalProps {
   days: DayData[]
 }
 
+const getDayTypeValue = (type: DayData['type']): number => {
+  switch (type) {
+    case 'full':
+      return 1
+    case 'half':
+      return 0.5
+    case 'holiday':
+      return 1
+    case 'holiday-worked':
+      return 2
+    case 'not-working':
+      return 0
+    default:
+      return 0
+  }
+}
+
 export default function CobraModal({
   isOpen,
   onClose,
@@ -24,24 +41,15 @@ export default function CobraModal({
 
   if (!isOpen) return null
 
-  // Calculate metrics
   const dailyValue = Math.round(monthlySalary / 26)
   const sortedDays = [...days].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-  
-  const getDayTypeValue = (type: string | null): number => {
-    if (!type) return 0
-    switch (type) {
-      case 'full': return 1
-      case 'half': return 0.5
-      case 'extra': return 1.5
-      case 'free': return 0
-      default: return 0
-    }
-  }
-
   const totalDays = days.reduce((sum, day) => sum + getDayTypeValue(day.type), 0)
-  const totalPaid = Math.round(totalDays * dailyValue)
-  
+  const additionalTotal = days.reduce((sum, day) => {
+    const amount = Number(day.additional_amount)
+    return sum + (Number.isFinite(amount) && amount > 0 ? amount : 0)
+  }, 0)
+  const totalPaid = Math.round(totalDays * dailyValue) + additionalTotal
+
   const firstDay = sortedDays.length > 0 ? new Date(sortedDays[0].date) : new Date()
   const lastDay = sortedDays.length > 0 ? new Date(sortedDays[sortedDays.length - 1].date) : new Date()
 
@@ -112,6 +120,11 @@ export default function CobraModal({
           <div className="bg-gradient-to-r from-green-500/20 to-emerald-500/20 rounded-lg p-4 border border-green-500/30">
             <p className="text-xs text-slate-400 mb-1">Total a Cobrar</p>
             <p className="text-3xl font-bold text-green-400">${totalPaid.toLocaleString('es-AR')}</p>
+            {additionalTotal > 0 && (
+              <p className="mt-2 text-xs text-emerald-300">
+                Incluye adicionales por día: ${additionalTotal.toLocaleString('es-AR')}
+              </p>
+            )}
           </div>
         </div>
 
