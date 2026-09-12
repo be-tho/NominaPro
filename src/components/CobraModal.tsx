@@ -1,8 +1,17 @@
-import { useState } from 'react'
-import { Check, X, Loader, AlertCircle } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Check, X, Loader, AlertCircle, Plus, Trash2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { recordPayment, deleteAllDays, type DayData } from '../lib/database'
+import {
+  recordPayment,
+  deleteAllDays,
+  fetchSettlementAdjustments,
+  createSettlementAdjustment,
+  deleteSettlementAdjustment,
+  type DayData,
+  type SettlementAdjustment,
+  type AdjustmentType,
+} from '../lib/database'
 
 interface CobraModalProps {
   isOpen: boolean
@@ -38,6 +47,27 @@ export default function CobraModal({
 }: CobraModalProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [adjustments, setAdjustments] = useState<SettlementAdjustment[]>([])
+  const [newAdjustment, setNewAdjustment] = useState({
+    label: '',
+    amount: '',
+    type: 'expense' as AdjustmentType,
+  })
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    const loadAdjustments = async () => {
+      try {
+        const data = await fetchSettlementAdjustments()
+        setAdjustments(data)
+      } catch {
+        setAdjustments([])
+      }
+    }
+
+    loadAdjustments()
+  }, [isOpen])
 
   if (!isOpen) return null
 
@@ -48,30 +78,77 @@ export default function CobraModal({
     const amount = Number(day.additional_amount)
     return sum + (Number.isFinite(amount) && amount > 0 ? amount : 0)
   }, 0)
-  const totalPaid = Math.round(totalDays * dailyValue) + additionalTotal
+  const baseTotal = Math.round(totalDays * dailyValue) + additionalTotal
+  const adjustmentsTotal = adjustments.reduce((sum, item) => {
+    const amount = Number(item.amount)
+    if (!Number.isFinite(amount)) return sum
+    return sum - Math.abs(amount)
+  }, 0)
+  const totalPaid = baseTotal + adjustmentsTotal
 
   const firstDay = sortedDays.length > 0 ? new Date(sortedDays[0].date) : new Date()
   const lastDay = sortedDays.length > 0 ? new Date(sortedDays[sortedDays.length - 1].date) : new Date()
+
+  const handleAddAdjustment = async () => {
+    const label = newAdjustment.label.trim()
+    const amount = Number(newAdjustment.amount)
+    if (!label || !Number.isFinite(amount) || amount <= 0) {
+      setError('Ingresá descripción y un monto válido para el ajuste.')
+      return
+    }
+
+    try {
+      setLoading(true)
+      setError(null)
+      await createSettlementAdjustment({
+        label,
+        amount,
+        type: newAdjustment.type,
+        date: format(new Date(), 'yyyy-MM-dd'),
+        notes: null,
+      })
+      const next = await fetchSettlementAdjustments()
+      setAdjustments(next)
+      setNewAdjustment({ label: '', amount: '', type: 'expense' })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo guardar el ajuste')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleDeleteAdjustment = async (id?: string) => {
+    if (!id) return
+
+    try {
+      setLoading(true)
+      await deleteSettlementAdjustment(id)
+      setAdjustments(prev => prev.filter(item => item.id !== id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar el ajuste')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleSettlement = async () => {
     setLoading(true)
     setError(null)
 
     try {
-      // Record the payment
       await recordPayment({
         total_days: totalDays,
         daily_value: dailyValue,
         total_paid: totalPaid,
+        adjustments_total: Math.abs(adjustmentsTotal),
+        net_total: totalPaid,
         payment_date: format(new Date(), 'yyyy-MM-dd'),
         period_start: format(firstDay, 'yyyy-MM-dd'),
         period_end: format(lastDay, 'yyyy-MM-dd'),
       })
 
-      // Delete all days to reset for next period
       await deleteAllDays()
-
-      // Call success callback to refresh UI
+      setAdjustments([])
       onSuccess()
       onClose()
     } catch (err) {
@@ -116,6 +193,72 @@ export default function CobraModal({
             </div>
           </div>
 
+          <div className="bg-slate-700/30 rounded-lg p-4 border border-slate-600">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-slate-400">Ajustes del período</p>
+              <span className="text-xs text-slate-300">${Math.abs(adjustmentsTotal).toLocaleString('es-AR')}</span>
+            </div>
+
+            <div className="space-y-2">
+              <input
+                value={newAdjustment.label}
+                onChange={e => setNewAdjustment(prev => ({ ...prev, label: e.target.value }))}
+                placeholder="Ej: Adelanto del viernes"
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              />
+
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={newAdjustment.amount}
+                  onChange={e => setNewAdjustment(prev => ({ ...prev, amount: e.target.value }))}
+                  placeholder="Monto"
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                />
+                <select
+                  value={newAdjustment.type}
+                  onChange={e => setNewAdjustment(prev => ({ ...prev, type: e.target.value as AdjustmentType }))}
+                  className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                >
+                  <option value="expense">Gasto</option>
+                  <option value="advance">Adelanto</option>
+                  <option value="discount">Descuento</option>
+                </select>
+              </div>
+
+              <button
+                onClick={handleAddAdjustment}
+                className="w-full flex items-center justify-center gap-2 bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 rounded-lg transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Agregar ajuste
+              </button>
+            </div>
+
+            {adjustments.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {adjustments.map(item => (
+                  <div key={item.id} className="flex items-center justify-between bg-slate-800 rounded-lg px-3 py-2 border border-slate-700">
+                    <div>
+                      <p className="text-sm text-white">{item.label}</p>
+                      <p className="text-[11px] text-slate-400 capitalize">
+                        {item.type === 'advance' ? 'Adelanto' : item.type === 'expense' ? 'Gasto' : 'Descuento'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-red-300">-${Number(item.amount).toLocaleString('es-AR')}</span>
+                      <button onClick={() => handleDeleteAdjustment(item.id)} className="text-slate-400 hover:text-red-400">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Total */}
           <div className="bg-gradient-to-r from-green-500/20 to-emerald-500/20 rounded-lg p-4 border border-green-500/30">
             <p className="text-xs text-slate-400 mb-1">Total a Cobrar</p>
@@ -123,6 +266,11 @@ export default function CobraModal({
             {additionalTotal > 0 && (
               <p className="mt-2 text-xs text-emerald-300">
                 Incluye adicionales por día: ${additionalTotal.toLocaleString('es-AR')}
+              </p>
+            )}
+            {adjustments.length > 0 && (
+              <p className="mt-1 text-xs text-red-300">
+                Ajustes descontados: ${Math.abs(adjustmentsTotal).toLocaleString('es-AR')}
               </p>
             )}
           </div>

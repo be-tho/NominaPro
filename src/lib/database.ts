@@ -6,6 +6,7 @@ import { apiFetch } from './api'
 // ============================================
 
 export type DayType = 'full' | 'half' | 'holiday' | 'holiday-worked' | 'not-working' | null
+export type AdjustmentType = 'advance' | 'expense' | 'discount'
 
 export interface DayData {
   id?: string
@@ -14,6 +15,18 @@ export interface DayData {
   additional_title?: string | null
   additional_amount?: number | null
   user_id?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface SettlementAdjustment {
+  id?: string
+  user_id?: string
+  label: string
+  amount: number
+  type: AdjustmentType
+  date: string
+  notes?: string | null
   created_at?: string
   updated_at?: string
 }
@@ -108,6 +121,35 @@ export const deleteAllDays = async () => {
 }
 
 // ============================================
+// SETTLEMENT ADJUSTMENTS OPERATIONS
+// ============================================
+
+export const fetchSettlementAdjustments = async (): Promise<SettlementAdjustment[]> => {
+  const data = await apiFetch<{ adjustments: SettlementAdjustment[] }>('/adjustments')
+  return data.adjustments ?? []
+}
+
+export const createSettlementAdjustment = async (adjustment: Omit<SettlementAdjustment, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => {
+  await apiFetch<{ adjustment: SettlementAdjustment }>('/adjustments', {
+    method: 'POST',
+    body: JSON.stringify({
+      label: adjustment.label,
+      amount: adjustment.amount,
+      type: adjustment.type,
+      date: adjustment.date,
+      notes: adjustment.notes ?? null,
+    }),
+  })
+}
+
+export const deleteSettlementAdjustment = async (id: string) => {
+  await apiFetch<{ deleted: number }>('/adjustments', {
+    method: 'DELETE',
+    query: { id },
+  })
+}
+
+// ============================================
 // SETTINGS OPERATIONS
 // ============================================
 
@@ -132,13 +174,20 @@ export const fetchUserSettings = async (): Promise<UserSettings | null> => {
 // PAYMENT HISTORY OPERATIONS
 // ============================================
 
-export const recordPayment = async (payment: Omit<PaymentRecord, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => {
+export const recordPayment = async (
+  payment: Omit<PaymentRecord, 'id' | 'user_id' | 'created_at' | 'updated_at'> & {
+    adjustments_total?: number
+    net_total?: number
+  }
+) => {
   await apiFetch<{ payment: PaymentRecord }>('/payments', {
     method: 'POST',
     body: JSON.stringify({
       total_days: payment.total_days,
       daily_value: payment.daily_value,
       total_paid: payment.total_paid,
+      adjustments_total: payment.adjustments_total ?? 0,
+      net_total: payment.net_total ?? payment.total_paid,
       payment_date: payment.payment_date,
       period_start: payment.period_start,
       period_end: payment.period_end,

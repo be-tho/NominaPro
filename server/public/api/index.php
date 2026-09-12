@@ -244,6 +244,76 @@ if ($key === 'POST /days/delete-all') {
     nominapro_json(true, ['deleted' => $del->rowCount()]);
 }
 
+// -------------------- settlement adjustments --------------------
+if ($key === 'GET /adjustments') {
+    $user = nominapro_require_user();
+    $st = $pdo->prepare(
+        'SELECT id, user_id, label, amount, type, date, notes, created_at, updated_at
+         FROM settlement_adjustments
+         WHERE user_id = ? ORDER BY date DESC, created_at DESC'
+    );
+    $st->execute([$user['id']]);
+    $rows = $st->fetchAll();
+    foreach ($rows as &$row) {
+        if (isset($row['date'])) {
+            $row['date'] = substr((string) $row['date'], 0, 10);
+        }
+    }
+    unset($row);
+    nominapro_json(true, ['adjustments' => $rows]);
+}
+
+if ($key === 'POST /adjustments') {
+    $user = nominapro_require_user();
+    $body = nominapro_read_json_body();
+
+    $label = trim((string) ($body['label'] ?? ''));
+    $amount = filter_var($body['amount'] ?? null, FILTER_VALIDATE_FLOAT);
+    $type = (string) ($body['type'] ?? '');
+    $date = (string) ($body['date'] ?? '');
+    if ($label === '') {
+        nominapro_json(false, null, 'La descripción es obligatoria', 422);
+    }
+    if ($amount === false || $amount <= 0) {
+        nominapro_json(false, null, 'El monto debe ser mayor a 0', 422);
+    }
+    if (!in_array($type, ['advance', 'expense', 'discount'], true)) {
+        nominapro_json(false, null, 'Tipo de ajuste inválido', 422);
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        nominapro_json(false, null, 'Fecha inválida', 422);
+    }
+
+    $ins = $pdo->prepare(
+        'INSERT INTO settlement_adjustments (user_id, label, amount, type, date, notes)
+         VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    $ins->execute([$user['id'], $label, $amount, $type, $date, (string) ($body['notes'] ?? '')]);
+
+    $sel = $pdo->prepare(
+        'SELECT id, user_id, label, amount, type, date, notes, created_at, updated_at
+         FROM settlement_adjustments WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
+    );
+    $sel->execute([$user['id']]);
+    $row = $sel->fetch();
+    if (is_array($row) && isset($row['date'])) {
+        $row['date'] = substr((string) $row['date'], 0, 10);
+    }
+    nominapro_json(true, ['adjustment' => $row]);
+}
+
+if ($key === 'DELETE /adjustments') {
+    $user = nominapro_require_user();
+    $id = (string) ($_GET['id'] ?? '');
+    if ($id === '') {
+        nominapro_json(false, null, 'Falta el id del ajuste', 422);
+    }
+
+    $del = $pdo->prepare('DELETE FROM settlement_adjustments WHERE user_id = ? AND id = ?');
+    $del->execute([$user['id'], $id]);
+    nominapro_json(true, ['deleted' => $del->rowCount()]);
+}
+
 // -------------------- settings --------------------
 if ($key === 'GET /settings') {
     $user = nominapro_require_user();
@@ -301,14 +371,19 @@ if ($key === 'POST /payments') {
     $body = nominapro_read_json_body();
 
     $totalDays = filter_var($body['total_days'] ?? null, FILTER_VALIDATE_FLOAT);
-    $dailyValue = filter_var($body['daily_value'] ?? null, FILTER_VALIDATE_INT);
-    $totalPaid = filter_var($body['total_paid'] ?? null, FILTER_VALIDATE_INT);
+    $dailyValue = filter_var($body['daily_value'] ?? null, FILTER_VALIDATE_FLOAT);
+    $totalPaid = filter_var($body['total_paid'] ?? null, FILTER_VALIDATE_FLOAT);
+    $adjustmentsTotal = filter_var($body['adjustments_total'] ?? 0, FILTER_VALIDATE_FLOAT);
+    $netTotal = filter_var($body['net_total'] ?? ($body['total_paid'] ?? 0), FILTER_VALIDATE_FLOAT);
     $paymentDate = (string) ($body['payment_date'] ?? '');
     $periodStart = (string) ($body['period_start'] ?? '');
     $periodEnd = (string) ($body['period_end'] ?? '');
 
     if ($totalDays === false || $dailyValue === false || $totalPaid === false) {
         nominapro_json(false, null, 'Datos de pago inválidos', 422);
+    }
+    if ($adjustmentsTotal === false || $netTotal === false) {
+        nominapro_json(false, null, 'Datos de ajustes inválidos', 422);
     }
     foreach ([$paymentDate, $periodStart, $periodEnd] as $d) {
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
@@ -317,21 +392,23 @@ if ($key === 'POST /payments') {
     }
 
     $ins = $pdo->prepare(
-        'INSERT INTO payment_history (user_id, total_days, daily_value, total_paid, payment_date, period_start, period_end)
-         VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO payment_history (user_id, total_days, daily_value, total_paid, adjustments_total, net_total, payment_date, period_start, period_end)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $ins->execute([
         $user['id'],
         $totalDays,
         $dailyValue,
         $totalPaid,
+        $adjustmentsTotal,
+        $netTotal,
         $paymentDate,
         $periodStart,
         $periodEnd,
     ]);
 
     $sel = $pdo->prepare(
-        'SELECT id, user_id, total_days, daily_value, total_paid, payment_date, period_start, period_end
+        'SELECT id, user_id, total_days, daily_value, total_paid, adjustments_total, net_total, payment_date, period_start, period_end
          FROM payment_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
     );
     $sel->execute([$user['id']]);
