@@ -38,6 +38,23 @@ const getDayTypeValue = (type: DayData['type']): number => {
   }
 }
 
+const getDayTypeLabel = (type: DayData['type']): string => {
+  switch (type) {
+    case 'full':
+      return 'Día Completo'
+    case 'half':
+      return 'Medio Día'
+    case 'holiday':
+      return 'Feriado'
+    case 'holiday-worked':
+      return 'Feriado Trabajado'
+    case 'not-working':
+      return 'No Trabajado'
+    default:
+      return 'Sin registrar'
+  }
+}
+
 export default function CobraModal({
   isOpen,
   onClose,
@@ -131,6 +148,125 @@ export default function CobraModal({
     }
   }
 
+  const generateSettlementSummary = () => {
+    const printWindow = window.open('', '_blank', 'width=900,height=700')
+    if (!printWindow) {
+      setError('El navegador bloqueó la ventana de resumen. Permití pop-ups para guardar o imprimir el comprobante.')
+      return
+    }
+
+    const dayRows = days.map(day => {
+      const typeLabel = day.type ? getDayTypeLabel(day.type) : 'Sin registrar'
+      const extraLabel = day.additional_title ? ` • ${day.additional_title}` : ''
+      const extraAmount = Number(day.additional_amount)
+      const extraValue = Number.isFinite(extraAmount) && extraAmount > 0 ? ` • $${extraAmount.toLocaleString('es-AR')}` : ''
+      return `
+        <tr>
+          <td>${format(new Date(day.date), 'dd/MM/yyyy')}</td>
+          <td>${typeLabel}</td>
+          <td>${extraLabel || '-'}${extraValue}</td>
+        </tr>
+      `
+    }).join('')
+
+    const adjustmentRows = adjustments.map(item => `
+      <tr>
+        <td>${item.label}</td>
+        <td>${item.type === 'advance' ? 'Adelanto' : item.type === 'expense' ? 'Gasto' : 'Descuento'}</td>
+        <td>$${Number(item.amount).toLocaleString('es-AR')}</td>
+      </tr>
+    `).join('')
+
+    const summaryDoc = `
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Resumen de cobro</title>
+          <style>
+            body { font-family: Arial, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 32px; }
+            .card { max-width: 900px; margin: 0 auto; background: white; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
+            h1 { margin: 0 0 10px; font-size: 28px; }
+            .meta { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 12px; margin: 20px 0; }
+            .meta div { background: #f1f5f9; border-radius: 10px; padding: 12px; }
+            .label { display: block; color: #475569; font-size: 12px; margin-bottom: 4px; text-transform: uppercase; }
+            .value { font-size: 18px; font-weight: 700; }
+            table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+            th, td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; text-align: left; font-size: 14px; }
+            th { background: #f8fafc; }
+            .total { margin-top: 24px; font-size: 22px; font-weight: 700; color: #15803d; }
+            .footer { margin-top: 18px; font-size: 12px; color: #64748b; }
+            @media print { body { background: white; } .card { box-shadow: none; border: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>Resumen de cobro</h1>
+            <div class="meta">
+              <div>
+                <span class="label">Período</span>
+                <span class="value">${format(firstDay, 'dd/MM/yyyy')} - ${format(lastDay, 'dd/MM/yyyy')}</span>
+              </div>
+              <div>
+                <span class="label">Fecha de cobro</span>
+                <span class="value">${format(new Date(), 'dd/MM/yyyy')}</span>
+              </div>
+              <div>
+                <span class="label">Días trabajados</span>
+                <span class="value">${totalDays.toFixed(1)}</span>
+              </div>
+              <div>
+                <span class="label">Valor diario</span>
+                <span class="value">$${dailyValue.toLocaleString('es-AR')}</span>
+              </div>
+            </div>
+
+            <h2>Detalle de días</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Tipo</th>
+                  <th>Adicional</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${dayRows || '<tr><td colspan="3">Sin días cargados</td></tr>'}
+              </tbody>
+            </table>
+
+            <h2>Gastos / adelantos / descuentos</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Descripción</th>
+                  <th>Tipo</th>
+                  <th>Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${adjustmentRows || '<tr><td colspan="3">Sin ajustes</td></tr>'}
+              </tbody>
+            </table>
+
+            <div class="total">
+              Total final: $${totalPaid.toLocaleString('es-AR')}
+            </div>
+
+            <div class="footer">
+              Base: $${baseTotal.toLocaleString('es-AR')} • Adicionales: $${additionalTotal.toLocaleString('es-AR')} • Ajustes: $${Math.abs(adjustmentsTotal).toLocaleString('es-AR')}
+            </div>
+          </div>
+        </body>
+      </html>
+    `
+
+    printWindow.document.open()
+    printWindow.document.write(summaryDoc)
+    printWindow.document.close()
+    printWindow.focus()
+  }
+
   const handleSettlement = async () => {
     setLoading(true)
     setError(null)
@@ -149,6 +285,7 @@ export default function CobraModal({
 
       await deleteAllDays()
       setAdjustments([])
+      generateSettlementSummary()
       onSuccess()
       onClose()
     } catch (err) {

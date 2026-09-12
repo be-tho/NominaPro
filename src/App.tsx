@@ -100,6 +100,7 @@ export default function App() {
   const [showForm, setShowForm] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [salaryInput, setSalaryInput] = useState(state.monthlySalary.toString())
+  const [selectedDayType, setSelectedDayType] = useState<DayType>('full')
   const [extraTitleInput, setExtraTitleInput] = useState('')
   const [extraAmountInput, setExtraAmountInput] = useState('')
   const [showCobraModal, setShowCobraModal] = useState(false)
@@ -134,6 +135,7 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedDate) {
+      setSelectedDayType('full')
       setExtraTitleInput('')
       setExtraAmountInput('')
       return
@@ -141,6 +143,7 @@ export default function App() {
 
     const dateStr = format(selectedDate, 'yyyy-MM-dd')
     const day = state.days.find(d => d.date === dateStr)
+    setSelectedDayType(day?.type ?? 'full')
     setExtraTitleInput(day?.additional_title ?? '')
     setExtraAmountInput(day?.additional_amount != null ? String(day.additional_amount) : '')
   }, [selectedDate, state.days])
@@ -691,27 +694,20 @@ export default function App() {
                   </div>
 
                   <div className="space-y-3">
-                    {(['full', 'half', 'holiday', 'holiday-worked', 'not-working'] as DayType[]).map(type => {
-                      const isSelected = getDayData(selectedDate)?.type === type
-
-                      return (
-                        <button
-                          key={type}
-                          onClick={() => setDayType(selectedDate, type)}
-                          className={`
-                            w-full p-4 rounded-lg font-medium text-sm transition-all
-                            ${
-                              isSelected
-                                ? `${getDayTypeColor(type)} text-white ring-2 ring-offset-2 ring-offset-slate-800`
-                                : 'bg-slate-700 text-slate-300 hover:bg-slate-600 border border-slate-600'
-                            }
-                          `}
-                        >
-                          <div className="font-bold">{getDayTypeLabel(type)}</div>
-                          <div className="text-xs opacity-75">{getDayTypeValue(type)} unidad(es)</div>
-                        </button>
-                      )
-                    })}
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Tipo de día
+                    </label>
+                    <select
+                      value={selectedDayType ?? 'full'}
+                      onChange={e => setSelectedDayType(e.target.value as DayType)}
+                      className="w-full px-3 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      {(['full', 'half', 'holiday', 'holiday-worked', 'not-working'] as DayType[]).map(type => (
+                        <option key={type} value={type ?? ''}>
+                          {type ? `${getDayTypeLabel(type)} (${getDayTypeValue(type)} unidad(es))` : 'Sin registrar'}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div className="mt-5 border-t border-slate-700 pt-4 space-y-3">
@@ -744,12 +740,21 @@ export default function App() {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => setDayType(selectedDate, null)}
-                    className="w-full mt-4 py-2 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg hover:bg-red-500/20 transition-colors"
-                  >
-                    Limpiar
-                  </button>
+                  <div className="mt-4 flex gap-3">
+                    <button
+                      onClick={() => setDayType(selectedDate, selectedDayType)}
+                      className="flex-1 py-2.5 text-sm text-white bg-gradient-to-r from-indigo-600 to-cyan-600 rounded-lg hover:from-indigo-500 hover:to-cyan-500 transition-all font-semibold"
+                    >
+                      Guardar día
+                    </button>
+
+                    <button
+                      onClick={() => setDayType(selectedDate, null)}
+                      className="flex-1 py-2.5 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg hover:bg-red-500/20 transition-colors font-medium"
+                    >
+                      Borrar
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
