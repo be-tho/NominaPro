@@ -314,6 +314,13 @@ if ($key === 'DELETE /adjustments') {
     nominapro_json(true, ['deleted' => $del->rowCount()]);
 }
 
+if ($key === 'POST /adjustments/delete-all') {
+    $user = nominapro_require_user();
+    $del = $pdo->prepare('DELETE FROM settlement_adjustments WHERE user_id = ?');
+    $del->execute([$user['id']]);
+    nominapro_json(true, ['deleted' => $del->rowCount()]);
+}
+
 // -------------------- settings --------------------
 if ($key === 'GET /settings') {
     $user = nominapro_require_user();

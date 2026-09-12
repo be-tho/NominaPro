@@ -149,6 +149,13 @@ export const deleteSettlementAdjustment = async (id: string) => {
   })
 }
 
+export const deleteAllSettlementAdjustments = async () => {
+  await apiFetch<{ deleted: number }>('/adjustments/delete-all', {
+    method: 'POST',
+    body: '{}',
+  })
+}
+
 // ============================================
 // SETTINGS OPERATIONS
 // ============================================

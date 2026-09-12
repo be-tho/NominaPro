@@ -8,6 +8,7 @@ import {
   fetchSettlementAdjustments,
   createSettlementAdjustment,
   deleteSettlementAdjustment,
+  deleteAllSettlementAdjustments,
   type DayData,
   type SettlementAdjustment,
   type AdjustmentType,
@@ -284,6 +285,7 @@ export default function CobraModal({
       })
 
       await deleteAllDays()
+      await deleteAllSettlementAdjustments()
       setAdjustments([])
       generateSettlementSummary()
       onSuccess()

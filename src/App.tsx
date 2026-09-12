@@ -12,13 +12,16 @@ import {
   LogOut,
   History,
   CreditCard,
+  CalendarDays,
 } from 'lucide-react'
 import {
   eachDayOfInterval,
-  startOfMonth,
+  eachWeekOfInterval,
   endOfMonth,
+  endOfWeek,
   format,
   isToday,
+  startOfMonth,
 } from 'date-fns'
 import { es } from 'date-fns/locale'
 import './App.css'
@@ -296,6 +299,32 @@ export default function App() {
     return firstDay.getDay()
   }
 
+  const getWeeklySummary = () => {
+    const monthStart = startOfMonth(currentMonth)
+    const monthEnd = endOfMonth(currentMonth)
+    const weekStarts = eachWeekOfInterval(
+      { start: monthStart, end: monthEnd },
+      { weekStartsOn: 1 }
+    )
+
+    return weekStarts.map((weekStart, index) => {
+      const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 })
+      const days = state.days
+        .filter(day => {
+          const currentDate = new Date(day.date)
+          return currentDate >= weekStart && currentDate <= weekEnd
+        })
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+      return {
+        label: `Semana ${index + 1}`,
+        start: weekStart,
+        end: weekEnd,
+        days,
+      }
+    })
+  }
+
   const calculateTotals = () => {
     const totalUnits = state.days.reduce((sum, day) => sum + getDayTypeValue(day.type), 0)
     const dailyValue = calculateDailyValue(state.monthlySalary)
@@ -317,6 +346,7 @@ export default function App() {
   }
 
   const { totalUnits, totalMoney, dayBreakdown } = calculateTotals()
+  const weeklySummary = getWeeklySummary()
 
   const monthDays = getDaysInMonth()
   const emptyDays = getStartingEmptyDays()
@@ -675,6 +705,54 @@ export default function App() {
                     <span className="text-slate-300 text-sm font-medium">Feriados Trab.</span>
                     <span className="text-red-400 font-bold">{dayBreakdown['holiday-worked']}</span>
                   </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-800 rounded-2xl border border-slate-700 p-8 shadow-2xl">
+                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                  <div className="w-8 h-8 bg-cyan-500/20 rounded-lg flex items-center justify-center">
+                    <CalendarDays className="w-4 h-4 text-cyan-400" />
+                  </div>
+                  Resumen Semanal
+                </h3>
+
+                <div className="space-y-3">
+                  {weeklySummary.map(week => (
+                    <div key={week.label} className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+                        <span>{week.label}</span>
+                        <span>
+                          {format(week.start, 'dd/MM')} - {format(week.end, 'dd/MM')}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {week.days.length > 0 ? (
+                          week.days.map(day => (
+                            <div
+                              key={day.date}
+                              className="min-w-[86px] rounded-lg border border-slate-600 bg-slate-800 px-2 py-2 text-left"
+                            >
+                              <div className="text-[10px] text-slate-400">{format(new Date(day.date), 'dd')}</div>
+                              <div className="text-[11px] font-semibold text-white">
+                                {day.type ? getDayTypeLabel(day.type) : 'Sin tipo'}
+                              </div>
+                              {day.additional_title && (
+                                <div className="text-[10px] text-cyan-300">{day.additional_title}</div>
+                              )}
+                              {day.additional_amount != null && Number(day.additional_amount) > 0 && (
+                                <div className="text-[10px] text-emerald-300">
+                                  ${Number(day.additional_amount).toLocaleString('es-AR')}
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        ) : (
+                          <span className="text-xs text-slate-500">Sin días cargados</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
