@@ -35,6 +35,10 @@ if ($route === '/') {
 }
 
 $key = $method . ' ' . $route;
+$isValidDate = static function (string $value): bool {
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+    return $date !== false && $date->format('Y-m-d') === $value;
+};
 
 // -------------------- auth/register --------------------
 if ($key === 'POST /auth/register') {
@@ -357,23 +361,130 @@ if ($key === 'PUT /settings') {
 if ($key === 'GET /payments') {
     $user = nominapro_require_user();
     $st = $pdo->prepare(
-        'SELECT id, user_id, total_days, daily_value, total_paid, payment_date, period_start, period_end, created_at, updated_at
+        'SELECT id, user_id, total_days, daily_value, total_paid, adjustments_total, net_total, payment_date, period_start, period_end, created_at, updated_at
          FROM payment_history WHERE user_id = ? ORDER BY payment_date DESC'
     );
     $st->execute([$user['id']]);
     $paymentRows = $st->fetchAll();
+    $daysByPayment = [];
+    if ($paymentRows !== []) {
+        $paymentIds = array_column($paymentRows, 'id');
+        $placeholders = implode(', ', array_fill(0, count($paymentIds), '?'));
+        $daySt = $pdo->prepare(
+            'SELECT payment_id, day_date, type, additional_title, additional_amount
+             FROM payment_history_days
+             WHERE user_id = ? AND payment_id IN (' . $placeholders . ')
+             ORDER BY day_date ASC'
+        );
+        $daySt->execute(array_merge([$user['id']], $paymentIds));
+        foreach ($daySt->fetchAll() as $dayRow) {
+            $dayRow['date'] = substr((string) $dayRow['day_date'], 0, 10);
+            unset($dayRow['day_date']);
+            $daysByPayment[$dayRow['payment_id']][] = $dayRow;
+        }
+    }
     foreach ($paymentRows as &$pr) {
         foreach (['payment_date', 'period_start', 'period_end'] as $dk) {
             if (isset($pr[$dk])) {
                 $pr[$dk] = substr((string) $pr[$dk], 0, 10);
             }
         }
+        $pr['days'] = $daysByPayment[$pr['id']] ?? [];
     }
     unset($pr);
     nominapro_json(true, ['payments' => $paymentRows]);
 }
 
-if ($key === 'POST /payments') {
+if ($key === 'PATCH /payments') {
+    $user = nominapro_require_user();
+    $id = (string) ($_GET['id'] ?? '');
+    $body = nominapro_read_json_body();
+    $totalDays = filter_var($body['total_days'] ?? null, FILTER_VALIDATE_FLOAT);
+    $dailyValue = filter_var($body['daily_value'] ?? null, FILTER_VALIDATE_FLOAT);
+    $totalPaid = filter_var($body['total_paid'] ?? null, FILTER_VALIDATE_FLOAT);
+    $adjustmentsTotal = filter_var($body['adjustments_total'] ?? null, FILTER_VALIDATE_FLOAT);
+    $netTotal = filter_var($body['net_total'] ?? null, FILTER_VALIDATE_FLOAT);
+    $paymentDate = (string) ($body['payment_date'] ?? '');
+    $periodStart = (string) ($body['period_start'] ?? '');
+    $periodEnd = (string) ($body['period_end'] ?? '');
+
+    if ($id === '') {
+        nominapro_json(false, null, 'Falta el id del cobro', 422);
+    }
+    if ($totalDays === false || $totalDays < 0 || $dailyValue === false || $dailyValue < 0 || $totalPaid === false) {
+        nominapro_json(false, null, 'Datos de pago inválidos', 422);
+    }
+    if ($adjustmentsTotal === false || $adjustmentsTotal < 0 || $netTotal === false) {
+        nominapro_json(false, null, 'Datos de ajustes inválidos', 422);
+    }
+    foreach ([$paymentDate, $periodStart, $periodEnd] as $date) {
+        if (!$isValidDate($date)) {
+            nominapro_json(false, null, 'Fechas inválidas', 422);
+        }
+    }
+    if ($periodStart > $periodEnd) {
+        nominapro_json(false, null, 'El inicio del período no puede ser posterior al final', 422);
+    }
+
+    $detailCheck = $pdo->prepare(
+        'SELECT COUNT(*) FROM payment_history_days
+         WHERE user_id = ? AND payment_id = ? AND (day_date < ? OR day_date > ?)'
+    );
+    $detailCheck->execute([$user['id'], $id, $periodStart, $periodEnd]);
+    if ((int) $detailCheck->fetchColumn() > 0) {
+        nominapro_json(false, null, 'El rango debe incluir todas las fechas del detalle diario', 422);
+    }
+
+    $up = $pdo->prepare(
+        'UPDATE payment_history
+         SET total_days = ?, daily_value = ?, total_paid = ?, adjustments_total = ?, net_total = ?,
+             payment_date = ?, period_start = ?, period_end = ?
+         WHERE user_id = ? AND id = ?'
+    );
+    $up->execute([
+        $totalDays,
+        $dailyValue,
+        $totalPaid,
+        $adjustmentsTotal,
+        $netTotal,
+        $paymentDate,
+        $periodStart,
+        $periodEnd,
+        $user['id'],
+        $id,
+    ]);
+
+    $sel = $pdo->prepare(
+        'SELECT id, user_id, total_days, daily_value, total_paid, adjustments_total, net_total, payment_date, period_start, period_end, created_at, updated_at
+         FROM payment_history WHERE user_id = ? AND id = ? LIMIT 1'
+    );
+    $sel->execute([$user['id'], $id]);
+    $row = $sel->fetch();
+    if (!$row) {
+        nominapro_json(false, null, 'Cobro no encontrado', 404);
+    }
+    foreach (['payment_date', 'period_start', 'period_end'] as $dateKey) {
+        $row[$dateKey] = substr((string) $row[$dateKey], 0, 10);
+    }
+    nominapro_json(true, ['payment' => $row]);
+}
+
+if ($key === 'DELETE /payments') {
+    $user = nominapro_require_user();
+    $id = (string) ($_GET['id'] ?? '');
+    if ($id === '') {
+        nominapro_json(false, null, 'Falta el id del cobro', 422);
+    }
+    $del = $pdo->prepare('DELETE FROM payment_history WHERE user_id = ? AND id = ?');
+    $del->execute([$user['id'], $id]);
+    if ($del->rowCount() === 0) {
+        nominapro_json(false, null, 'Cobro no encontrado', 404);
+    }
+    nominapro_json(true, ['deleted' => 1]);
+}
+
+$isSettlement = $key === 'POST /settlements';
+if ($key === 'POST /payments' || $isSettlement) {
     $user = nominapro_require_user();
     $body = nominapro_read_json_body();
 
@@ -385,6 +496,7 @@ if ($key === 'POST /payments') {
     $paymentDate = (string) ($body['payment_date'] ?? '');
     $periodStart = (string) ($body['period_start'] ?? '');
     $periodEnd = (string) ($body['period_end'] ?? '');
+    $paymentDays = $body['days'] ?? [];
 
     if ($totalDays === false || $dailyValue === false || $totalPaid === false) {
         nominapro_json(false, null, 'Datos de pago inválidos', 422);
@@ -393,41 +505,127 @@ if ($key === 'POST /payments') {
         nominapro_json(false, null, 'Datos de ajustes inválidos', 422);
     }
     foreach ([$paymentDate, $periodStart, $periodEnd] as $d) {
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
+        if (!$isValidDate($d)) {
             nominapro_json(false, null, 'Fechas inválidas', 422);
         }
     }
+    if ($periodStart > $periodEnd) {
+        nominapro_json(false, null, 'El inicio del período no puede ser posterior al final', 422);
+    }
+    if (!is_array($paymentDays)) {
+        nominapro_json(false, null, 'Detalle diario inválido', 422);
+    }
 
-    $ins = $pdo->prepare(
-        'INSERT INTO payment_history (user_id, total_days, daily_value, total_paid, adjustments_total, net_total, payment_date, period_start, period_end)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    );
-    $ins->execute([
-        $user['id'],
-        $totalDays,
-        $dailyValue,
-        $totalPaid,
-        $adjustmentsTotal,
-        $netTotal,
-        $paymentDate,
-        $periodStart,
-        $periodEnd,
-    ]);
+    $daySnapshots = [];
+    foreach ($paymentDays as $paymentDay) {
+        if (!is_array($paymentDay)) {
+            nominapro_json(false, null, 'Detalle diario inválido', 422);
+        }
+        $dayDate = (string) ($paymentDay['date'] ?? '');
+        $dayType = (string) ($paymentDay['type'] ?? '');
+        $additionalTitle = trim((string) ($paymentDay['additional_title'] ?? ''));
+        $amountValue = $paymentDay['additional_amount'] ?? null;
+        $additionalAmount = $amountValue === null || $amountValue === ''
+            ? null
+            : filter_var($amountValue, FILTER_VALIDATE_FLOAT);
 
-    $sel = $pdo->prepare(
-        'SELECT id, user_id, total_days, daily_value, total_paid, adjustments_total, net_total, payment_date, period_start, period_end
-         FROM payment_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
-    );
-    $sel->execute([$user['id']]);
-    $row = $sel->fetch();
-    if (is_array($row)) {
-        foreach (['payment_date', 'period_start', 'period_end'] as $dk) {
-            if (isset($row[$dk])) {
-                $row[$dk] = substr((string) $row[$dk], 0, 10);
+        if (!$isValidDate($dayDate) || $dayDate < $periodStart || $dayDate > $periodEnd) {
+            nominapro_json(false, null, 'La fecha de un día está fuera del período', 422);
+        }
+        if (!in_array($dayType, NOMINAPRO_DAY_TYPES, true)) {
+            nominapro_json(false, null, 'Tipo de día inválido en el detalle', 422);
+        }
+        if ($additionalAmount === false || ($additionalAmount !== null && $additionalAmount < 0)) {
+            nominapro_json(false, null, 'Importe adicional inválido', 422);
+        }
+
+        $daySnapshots[] = [
+            'date' => $dayDate,
+            'type' => $dayType,
+            'additional_title' => $additionalTitle !== '' ? $additionalTitle : null,
+            'additional_amount' => $additionalAmount,
+        ];
+    }
+
+    $paymentId = nominapro_uuid_v4();
+    $daysDeleted = 0;
+    $adjustmentsDeleted = 0;
+    if ($isSettlement) {
+        $pdo->beginTransaction();
+    }
+
+    try {
+        $ins = $pdo->prepare(
+            'INSERT INTO payment_history (id, user_id, total_days, daily_value, total_paid, adjustments_total, net_total, payment_date, period_start, period_end)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $ins->execute([
+            $paymentId,
+            $user['id'],
+            $totalDays,
+            $dailyValue,
+            $totalPaid,
+            $adjustmentsTotal,
+            $netTotal,
+            $paymentDate,
+            $periodStart,
+            $periodEnd,
+        ]);
+
+        if ($isSettlement) {
+            $dayInsert = $pdo->prepare(
+                'INSERT INTO payment_history_days (payment_id, user_id, day_date, type, additional_title, additional_amount)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            );
+            foreach ($daySnapshots as $daySnapshot) {
+                $dayInsert->execute([
+                    $paymentId,
+                    $user['id'],
+                    $daySnapshot['date'],
+                    $daySnapshot['type'],
+                    $daySnapshot['additional_title'],
+                    $daySnapshot['additional_amount'],
+                ]);
+            }
+
+            $deleteDays = $pdo->prepare('DELETE FROM days WHERE user_id = ?');
+            $deleteDays->execute([$user['id']]);
+            $daysDeleted = $deleteDays->rowCount();
+
+            $deleteAdjustments = $pdo->prepare('DELETE FROM settlement_adjustments WHERE user_id = ?');
+            $deleteAdjustments->execute([$user['id']]);
+            $adjustmentsDeleted = $deleteAdjustments->rowCount();
+        }
+
+        $sel = $pdo->prepare(
+            'SELECT id, user_id, total_days, daily_value, total_paid, adjustments_total, net_total, payment_date, period_start, period_end
+             FROM payment_history WHERE user_id = ? AND id = ? LIMIT 1'
+        );
+        $sel->execute([$user['id'], $paymentId]);
+        $row = $sel->fetch();
+        if (is_array($row)) {
+            foreach (['payment_date', 'period_start', 'period_end'] as $dk) {
+                if (isset($row[$dk])) {
+                    $row[$dk] = substr((string) $row[$dk], 0, 10);
+                }
             }
         }
+
+        if ($isSettlement) {
+            $pdo->commit();
+        }
+    } catch (Throwable $e) {
+        if ($isSettlement && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
     }
-    nominapro_json(true, ['payment' => $row]);
+
+    $response = ['payment' => $row];
+    if ($isSettlement) {
+        $response['cleared'] = ['days' => $daysDeleted, 'adjustments' => $adjustmentsDeleted];
+    }
+    nominapro_json(true, $response);
 }
 
 nominapro_json(false, null, 'Ruta no encontrada', 404);

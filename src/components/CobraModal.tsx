@@ -1,14 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Check, X, Loader, AlertCircle, Plus, Trash2 } from 'lucide-react'
-import { format } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
   recordPayment,
-  deleteAllDays,
   fetchSettlementAdjustments,
   createSettlementAdjustment,
   deleteSettlementAdjustment,
-  deleteAllSettlementAdjustments,
   type DayData,
   type SettlementAdjustment,
   type AdjustmentType,
@@ -64,6 +62,7 @@ export default function CobraModal({
   days,
 }: CobraModalProps) {
   const [loading, setLoading] = useState(false)
+  const [settlementSaved, setSettlementSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [adjustments, setAdjustments] = useState<SettlementAdjustment[]>([])
   const [newAdjustment, setNewAdjustment] = useState({
@@ -90,7 +89,7 @@ export default function CobraModal({
   if (!isOpen) return null
 
   const dailyValue = Math.round(monthlySalary / 26)
-  const sortedDays = [...days].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+  const sortedDays = [...days].sort((a, b) => a.date.localeCompare(b.date))
   const totalDays = days.reduce((sum, day) => sum + getDayTypeValue(day.type), 0)
   const additionalTotal = days.reduce((sum, day) => {
     const amount = Number(day.additional_amount)
@@ -104,8 +103,8 @@ export default function CobraModal({
   }, 0)
   const totalPaid = baseTotal + adjustmentsTotal
 
-  const firstDay = sortedDays.length > 0 ? new Date(sortedDays[0].date) : new Date()
-  const lastDay = sortedDays.length > 0 ? new Date(sortedDays[sortedDays.length - 1].date) : new Date()
+  const firstDay = sortedDays.length > 0 ? parseISO(sortedDays[0].date) : new Date()
+  const lastDay = sortedDays.length > 0 ? parseISO(sortedDays[sortedDays.length - 1].date) : new Date()
 
   const handleAddAdjustment = async () => {
     const label = newAdjustment.label.trim()
@@ -163,7 +162,7 @@ export default function CobraModal({
       const extraValue = Number.isFinite(extraAmount) && extraAmount > 0 ? ` • $${extraAmount.toLocaleString('es-AR')}` : ''
       return `
         <tr>
-          <td>${format(new Date(day.date), 'dd/MM/yyyy')}</td>
+          <td>${format(parseISO(day.date), 'dd/MM/yyyy')}</td>
           <td>${typeLabel}</td>
           <td>${extraLabel || '-'}${extraValue}</td>
         </tr>
@@ -269,8 +268,11 @@ export default function CobraModal({
   }
 
   const handleSettlement = async () => {
+    if (settlementSaved) return
+
     setLoading(true)
     setError(null)
+    let paymentRecorded = false
 
     try {
       await recordPayment({
@@ -282,16 +284,21 @@ export default function CobraModal({
         payment_date: format(new Date(), 'yyyy-MM-dd'),
         period_start: format(firstDay, 'yyyy-MM-dd'),
         period_end: format(lastDay, 'yyyy-MM-dd'),
+        days,
       })
+      paymentRecorded = true
+      setSettlementSaved(true)
 
-      await deleteAllDays()
-      await deleteAllSettlementAdjustments()
       setAdjustments([])
       generateSettlementSummary()
       onSuccess()
+      setSettlementSaved(false)
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al procesar el cobro')
+      const message = err instanceof Error ? err.message : 'Error al procesar el cobro'
+      setError(paymentRecorded
+        ? `El cobro y la limpieza ya quedaron guardados en el servidor. Falló la actualización de pantalla; no vuelvas a confirmar para evitar duplicarlo. ${message}`
+        : message)
     } finally {
       setLoading(false)
     }
@@ -434,7 +441,7 @@ export default function CobraModal({
           </button>
           <button
             onClick={handleSettlement}
-            disabled={loading || totalPaid === 0}
+            disabled={loading || settlementSaved || totalPaid === 0}
             className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2 px-4 rounded-lg transition-all flex items-center justify-center gap-2"
           >
             {loading ? (
@@ -445,7 +452,7 @@ export default function CobraModal({
             ) : (
               <>
                 <Check className="w-4 h-4" />
-                Confirmar Cobro
+                {settlementSaved ? 'Cobro guardado' : 'Confirmar Cobro'}
               </>
             )}
           </button>

@@ -21,6 +21,7 @@ import {
   endOfWeek,
   format,
   isToday,
+  parseISO,
   startOfMonth,
 } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -311,10 +312,10 @@ export default function App() {
       const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 })
       const days = state.days
         .filter(day => {
-          const currentDate = new Date(day.date)
+          const currentDate = parseISO(day.date)
           return currentDate >= weekStart && currentDate <= weekEnd
         })
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        .sort((a, b) => a.date.localeCompare(b.date))
 
       return {
         label: `Semana ${index + 1}`,
@@ -733,7 +734,7 @@ export default function App() {
                               key={day.date}
                               className="min-w-[86px] rounded-lg border border-slate-600 bg-slate-800 px-2 py-2 text-left"
                             >
-                              <div className="text-[10px] text-slate-400">{format(new Date(day.date), 'dd')}</div>
+                              <div className="text-[10px] text-slate-400">{format(parseISO(day.date), 'dd')}</div>
                               <div className="text-[11px] font-semibold text-white">
                                 {day.type ? getDayTypeLabel(day.type) : 'Sin tipo'}
                               </div>

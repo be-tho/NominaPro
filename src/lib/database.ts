@@ -39,15 +39,25 @@ export interface UserSettings {
   updated_at?: string
 }
 
+export interface PaymentDaySnapshot {
+  date: string
+  type: Exclude<DayType, null>
+  additional_title?: string | null
+  additional_amount?: number | null
+}
+
 export interface PaymentRecord {
   id?: string
   user_id?: string
   total_days: number
   daily_value: number
   total_paid: number
+  adjustments_total?: number
+  net_total?: number
   payment_date: string
   period_start: string
   period_end: string
+  days?: PaymentDaySnapshot[]
   created_at?: string
   updated_at?: string
 }
@@ -182,12 +192,13 @@ export const fetchUserSettings = async (): Promise<UserSettings | null> => {
 // ============================================
 
 export const recordPayment = async (
-  payment: Omit<PaymentRecord, 'id' | 'user_id' | 'created_at' | 'updated_at'> & {
+  payment: Omit<PaymentRecord, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'days'> & {
     adjustments_total?: number
     net_total?: number
+    days: DayData[]
   }
 ) => {
-  await apiFetch<{ payment: PaymentRecord }>('/payments', {
+  await apiFetch<{ payment: PaymentRecord; cleared: { days: number; adjustments: number } }>('/settlements', {
     method: 'POST',
     body: JSON.stringify({
       total_days: payment.total_days,
@@ -198,7 +209,39 @@ export const recordPayment = async (
       payment_date: payment.payment_date,
       period_start: payment.period_start,
       period_end: payment.period_end,
+      days: payment.days.map(day => ({
+        date: day.date,
+        type: day.type,
+        additional_title: day.additional_title ?? null,
+        additional_amount: day.additional_amount ?? null,
+      })),
     }),
+  })
+}
+
+export const updatePaymentHistory = async (
+  id: string,
+  payment: Pick<PaymentRecord, 'total_days' | 'daily_value' | 'total_paid' | 'adjustments_total' | 'net_total' | 'payment_date' | 'period_start' | 'period_end'>
+): Promise<PaymentRecord> => {
+  const data = await apiFetch<{ payment: PaymentRecord }>('/payments', {
+    method: 'PATCH',
+    query: { id },
+    body: JSON.stringify(payment),
+  })
+  return {
+    ...data.payment,
+    total_days: Number(data.payment.total_days),
+    daily_value: Number(data.payment.daily_value),
+    total_paid: Number(data.payment.total_paid),
+    adjustments_total: Number(data.payment.adjustments_total ?? 0),
+    net_total: Number(data.payment.net_total ?? data.payment.total_paid),
+  }
+}
+
+export const deletePaymentHistory = async (id: string): Promise<void> => {
+  await apiFetch<{ deleted: number }>('/payments', {
+    method: 'DELETE',
+    query: { id },
   })
 }
 
@@ -207,6 +250,14 @@ export const fetchPaymentHistory = async (): Promise<PaymentRecord[]> => {
   const rows = data.payments ?? []
   return rows.map((p) => ({
     ...p,
-    total_days: typeof p.total_days === 'string' ? parseFloat(p.total_days) : p.total_days,
+    total_days: Number(p.total_days),
+    daily_value: Number(p.daily_value),
+    total_paid: Number(p.total_paid),
+    adjustments_total: p.adjustments_total == null ? undefined : Number(p.adjustments_total),
+    net_total: p.net_total == null ? undefined : Number(p.net_total),
+    days: (p.days ?? []).map(day => ({
+      ...day,
+      additional_amount: day.additional_amount == null ? null : Number(day.additional_amount),
+    })),
   }))
 }

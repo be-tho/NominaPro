@@ -29,6 +29,7 @@ type ApiInit = RequestInit & { query?: Record<string, string> }
 
 export async function apiFetch<T>(route: string, init?: ApiInit): Promise<T> {
   const { query, ...fetchInit } = init ?? {}
+  const method = fetchInit.method ?? 'GET'
   const res = await fetch(apiUrl(route, query), {
     ...fetchInit,
     credentials: 'include',
@@ -45,11 +46,11 @@ export async function apiFetch<T>(route: string, init?: ApiInit): Promise<T> {
         ? ` (HTTP ${res.status}${res.statusText ? `: ${res.statusText}` : ''})`
         : ''
     throw new Error(
-      `Respuesta inválida del servidor${hint}. ¿La URL /api/index.php devuelve JSON? Revisá .htaccess en la raíz del sitio.`
+      `Respuesta inválida del servidor para ${method} ${route}${hint}. ¿La URL /api/index.php devuelve JSON? Revisá .htaccess en la raíz del sitio.`
     )
   }
   if (!json.ok) {
-    throw new Error(json.error || `Error HTTP ${res.status}`)
+    throw new Error(`${json.error || `Error HTTP ${res.status}`} (${method} ${route})`)
   }
   return json.data
 }
